@@ -1,24 +1,31 @@
-const db = require('./db');
+const { promisify } = require("util");
+const redis = require("redis").createClient({
+  host: process.env.REDIS_HOST
+});
+
+const getCache = promisify(redis.get).bind(redis);
 
 async function getTimestamp(hash) {
-  return await db.knex('timestamps').where({ hash }).select();
-}
-async function getTimestamps(hashes) {
-  const returnHashes = {};
   try {
-    const dbHashes = await db.knex('timestamps').whereIn('hash', hashes).select();
+    const timestamp = await getCache(`block_timestamp/${hash}`);
+    if (timestamp) return timestamp;
+  } catch (e) {}
 
-    hashes.forEach(hash => {
-      const dbResult = dbHashes.find(dbHash => dbHash.hash === hash);
-      returnHashes[hash] = dbResult ? dbResult.timestamp : null;
-    });
+  return null;
+}
 
-    return returnHashes;
-  } catch (err) {
-    console.log(`Error retrieving timestamps for `, hashes);
-    console.log(err);
-    return [];
-  }
+async function getTimestamps(hashes) {
+  return new Promise((resolve, reject) => {
+    const returnHashes = {};
+    redis
+      .multi(hashes.map(hash => ["get", `block_timestamp/${hash}`]))
+      .exec((err, replies) => {
+        if (err) return resolve([]);
+
+        hashes.forEach((hash, index) => (returnHashes[hash] = replies[index]));
+        resolve(returnHashes);
+      });
+  });
 }
 
 /**
