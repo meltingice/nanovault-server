@@ -97,35 +97,40 @@ app.post("/api/node-api", async (req, res) => {
   }
 
   // Determine if this should go to the work node instead
-  if ((workRequest || representativeRequest) && !nodeOverride) {
-    nodeUrl = nanoWorkNodeUrl;
-  }
-
-  // Send the request to the Nano node and return the response
-  request({ method: "post", uri: nodeUrl, body: req.body, json: true })
-    .then(async proxyRes => {
-      if (proxyRes && !nodeOverride) {
-        if (workRequest && proxyRes.work) {
-          putCache(req.body.hash, proxyRes.work);
-        }
-        if (representativeRequest && proxyRes.representatives) {
-          putCache(repCacheKey, JSON.stringify(proxyRes), 5 * 60); // Cache online representatives for 5 minutes
-        }
-      }
-
-      // Add timestamps to certain requests
-      if (req.body.action === "account_history") {
-        proxyRes = await timestamps.mapAccountHistory(proxyRes);
-      }
-      if (req.body.action === "blocks_info") {
-        proxyRes = await timestamps.mapBlocksInfo(req.body.hashes, proxyRes);
-      }
-      if (req.body.action === "pending") {
-        proxyRes = await timestamps.mapPending(proxyRes);
-      }
-      res.json(proxyRes);
+  if (workRequest) {
+    console.log(`dPoW request: ${req.body.hash}`);
+    const dpowReq = { hash: req.body.hash, key: process.env.DPOS_API_KEY };
+    request({
+      method: "post",
+      uri: process.env.DPOS_ENDPOINT,
+      body: dpowReq,
+      json: true
     })
-    .catch(err => res.status(500).json(err.toString()));
+      .then(async proxyRes => {
+        if (proxyRes && proxyRes.work) {
+          putCache(req.body.hash, proxyRes.work);
+          res.json(proxyRes);
+        }
+      })
+      .catch(err => res.status(500).json(err.toString()));
+  } else {
+    // Send the request to the Nano node and return the response
+    request({ method: "post", uri: nodeUrl, body: req.body, json: true })
+      .then(async proxyRes => {
+        // Add timestamps to certain requests
+        if (req.body.action === "account_history") {
+          proxyRes = await timestamps.mapAccountHistory(proxyRes);
+        }
+        if (req.body.action === "blocks_info") {
+          proxyRes = await timestamps.mapBlocksInfo(req.body.hashes, proxyRes);
+        }
+        if (req.body.action === "pending") {
+          proxyRes = await timestamps.mapPending(proxyRes);
+        }
+        res.json(proxyRes);
+      })
+      .catch(err => res.status(500).json(err.toString()));
+  }
 });
 
 app.listen(listeningPort, () =>
