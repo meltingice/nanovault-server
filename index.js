@@ -30,7 +30,16 @@ app.use(express.json());
 
 // Serve the production copy of the wallet
 app.use(express.static("static"));
-app.get("/*", (req, res) => res.sendFile(`${__dirname}/static/index.html`));
+
+// Allow requests to recommended reps
+app.get("/api/recommended-representatives", async (req, res) => {
+  const reps = await getCache("recommended-reps");
+  if (reps) {
+    return res.json(JSON.parse(reps));
+  } else {
+    return await getRecommendedReps();
+  }
+});
 
 // Allow certain requests to the Nano RPC and cache work requests
 app.post("/api/node-api", async (req, res) => {
@@ -133,6 +142,9 @@ app.post("/api/node-api", async (req, res) => {
   }
 });
 
+// Redirect all other GET requests to wallet
+app.get("/*", (req, res) => res.sendFile(`${__dirname}/static/index.html`));
+
 app.listen(listeningPort, () =>
   console.log(`App listening on port ${listeningPort}!`)
 );
@@ -163,3 +175,23 @@ if (useRedisCache) {
     if (workCache.length >= memoryCacheLength) workCache.shift(); // If the list is too long, prune it.
   };
 }
+
+function getRecommendedReps() {
+  return request({
+    method: "get",
+    uri: `https://mynano.ninja/api/accounts/verified`,
+    json: true
+  }).then(res => {
+    putCache("recommended-reps", JSON.stringify(res), 45 * 60); // Store for 45 minutes
+
+    return res;
+  });
+}
+
+// Recache the recommended reps every 15 minutes
+function pollRecommended() {
+  getRecommendedReps();
+  setInterval(getRecommendedReps, 15 * 60 * 1000);
+}
+
+pollRecommended();
